@@ -1,0 +1,13 @@
+# Aiken compilation artifacts
+artifacts/
+# Aiken's project working directory
+build/
+# Aiken's default documentation export
+docs/
+
+# Direnv configuration
+.direnv/
+.envrc
+
+# git pre-commit hooks
+.pre-commit-config.yaml
