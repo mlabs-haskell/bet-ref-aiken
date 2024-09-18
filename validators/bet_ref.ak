@@ -4,7 +4,9 @@ use aiken/interval.{
   Finite, Interval, IntervalBound, NegativeInfinity, PositiveInfinity, before,
 }
 use cardano/address.{Address}
-use cardano/assets.{AssetName, PolicyId, Value, merge, negate, to_dict}
+use cardano/assets.{
+  AssetName, PolicyId, Value, from_asset_list, merge, negate, to_dict,
+}
 use cardano/transaction.{InlineDatum, Output, OutputReference, Transaction}
 use types.{
   Bet, BetRefAction, BetRefDatum, BetRefParams, OracleAnswerDatum, POSIXTime,
@@ -19,12 +21,14 @@ validator bet_ref(params: BetRefParams) {
     utxo: OutputReference,
     self: Transaction,
   ) {
-    let BetRefParams(_oracle_pkh, bet_until, _bet_reveal, bet_step) = params
+    let BetRefParams(_oracle_pkh, bet_until, _bet_reveal, bet_step_list) =
+      params
+    let bet_step = from_asset_list(bet_step_list)
     when brAction is {
       Bet(guess) -> {
         trace @"Previous guess should exist"
-        expect Some(previous_guess) = datum
-        handle_bet(guess, previous_guess, bet_until, bet_step, utxo, self)
+        expect Some(prev_datum): Option<BetRefDatum> = datum
+        handle_bet(guess, prev_datum, bet_until, bet_step, utxo, self)
       }
       Take -> handle_take()
     }
@@ -64,11 +68,12 @@ fn handle_bet(
 
   trace @"The current bet must be more than the previous bet by at least `bet_step` amount"
   //FIXME: this is not very clear to me
-  let min_out_value = in_value |> merge(prev_bet_value) |> merge(bet_step)
+  let min_out_value =
+    in_value |> merge(from_asset_list(prev_bet_value)) |> merge(bet_step)
   expect out_value |> geq(min_out_value)
 
   trace @"Out bet value is wrong"
-  let expected_in_value = out_value |> merge(negate(bet_value))
+  let expected_in_value = out_value |> merge(negate(from_asset_list(bet_value)))
   expect in_value == expected_in_value
 
   // We are done

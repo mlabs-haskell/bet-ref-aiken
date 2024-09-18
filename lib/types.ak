@@ -1,5 +1,5 @@
 use aiken/crypto.{Blake2b_224, Hash, VerificationKey}
-use cardano/assets.{Value}
+use cardano/assets.{AssetName, PolicyId}
 
 pub type TeamGoals =
   Int
@@ -13,7 +13,8 @@ pub type BetRefParams {
     brpOraclePkh: PubKeyHash,
     brpBetUntil: POSIXTime,
     brpBetReveal: POSIXTime,
-    brpBetStep: Value,
+    /// Non-opaque Value
+    brpBetStep: Pairs<PolicyId, Pairs<AssetName, Int>>,
   }
 }
 
@@ -26,7 +27,8 @@ pub type POSIXTime =
 pub type BetRefDatum {
   BetRefDatum {
     brdBets: List<Pair<PubKeyHash, OracleAnswerDatum>>,
-    brdPreviousBet: Value,
+    /// Non-opaque Value
+    brdPreviousBet: Pairs<PolicyId, Pairs<AssetName, Int>>,
   }
 }
 
