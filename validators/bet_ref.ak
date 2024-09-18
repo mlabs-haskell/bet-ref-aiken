@@ -1,36 +1,37 @@
 use aiken/collection/dict.{Dict, foldl, map, union_with, values}
 use aiken/collection/list.{all, concat, filter, find, push}
 use aiken/interval.{
-  Finite, Interval, IntervalBound, NegativeInfinity, PositiveInfinity, before,
+  Finite, Interval, IntervalBound, NegativeInfinity, PositiveInfinity, after,
+  before,
 }
-use cardano/address.{Address}
+use aiken/math.{abs}
+use cardano/address.{Address, VerificationKey}
 use cardano/assets.{
   AssetName, PolicyId, Value, from_asset_list, merge, negate, to_dict,
 }
 use cardano/transaction.{InlineDatum, Output, OutputReference, Transaction}
 use types.{
   Bet, BetRefAction, BetRefDatum, BetRefParams, OracleAnswerDatum, POSIXTime,
-  Take,
+  PubKeyHash, Take,
 }
 
 validator bet_ref(params: BetRefParams) {
   spend(
-    datum: Option<BetRefDatum>,
+    mDatum: Option<BetRefDatum>,
     brAction: BetRefAction,
     // redeemer
     utxo: OutputReference,
     self: Transaction,
   ) {
-    let BetRefParams(_oracle_pkh, bet_until, _bet_reveal, bet_step_list) =
-      params
+    let BetRefParams(oracle_pkh, bet_until, bet_reveal, bet_step_list) = params
     let bet_step = from_asset_list(bet_step_list)
+    expect Some(datum): Option<BetRefDatum> = mDatum
     when brAction is {
       Bet(guess) -> {
         trace @"Previous guess should exist"
-        expect Some(prev_datum): Option<BetRefDatum> = datum
-        handle_bet(guess, prev_datum, bet_until, bet_step, utxo, self)
+        handle_bet(guess, datum, bet_until, bet_step, utxo, self)
       }
-      Take -> handle_take()
+      Take -> handle_take(datum, oracle_pkh, bet_reveal, utxo, self)
     }
   }
 
@@ -80,48 +81,57 @@ fn handle_bet(
   True
 }
 
-fn handle_take() -> Bool {
-  fail
-  //     Take ->
-  //       let
-  //         -- Note that `find` returns the first match. Since we were always prepending, this is valid.
-  //         Just guess = find ((== signerPkh) . fst) previousGuesses
-  //         oracleIn = case filter (isNothing . txOutReferenceScript) (txInInfoResolved <$> txInfoReferenceInputs info) of
-  //           [oracleIn'] -> oracleIn'
-  //           [] -> traceError "No reference input provided"
-  //           _anyOtherMatch -> traceError "Expected only one reference input"
-  //         oracleAnswer = case outputToDatum oracleIn of
-  //           Nothing -> traceError "Could not resolve for datum"
-  //           (Just (OracleAnswerDatum oracleAnswer')) -> oracleAnswer'
-  //         guessDiff = getGuessDiff $ snd guess
-  //         getGuessDiff (OracleAnswerDatum g) = abs (oracleAnswer - g)
-  //         -- Unwrapping the 'Maybe' here to extract the 'Just' (and trace error for 'Nothing') kills PlutusTx compilation
-  //         -- the issue is that GHC will fire the worker wrapper transformation combining this with the equality with 'oraclePkh'
-  //         -- code down below. Which will cause issues with BuiltinByteString also being unwrapped into primitive pointers.
-  //         -- See: https://github.com/IntersectMBO/plutus/issues/4193
-  //         mOracleInPkh = toPubKeyHash (txOutAddress oracleIn)
-  //        in
-  //         traceIfFalse
-  //           "Must be after `RevealTime`"
-  //           (from betReveal `contains` validRange)
-  //           && traceIfFalse
-  //             "Must fully spend Script"
-  //             (null (getContinuingOutputs ctx))
-  //           && traceIfFalse
-  //             "Reference input must be from Oracle address (wrt Payment part)"
-  //             (mOracleInPkh == Just oraclePkh)
-  //           && traceIfFalse
-  //             "Guess is not closest"
-  //             (all (\pg -> getGuessDiff (snd pg) >= guessDiff) previousGuesses)
-}
+fn handle_take(
+  datum: BetRefDatum,
+  oracle_pkh: PubKeyHash,
+  bet_reveal: POSIXTime,
+  utxo: OutputReference,
+  self: Transaction,
+) -> Bool {
+  trace @"Expected only one signature"
+  expect [signer_pkh] = self.extra_signatories
+  let BetRefDatum(brdBets, ..) = datum
 
-//   outputToDatum :: FromData b => TxOut -> Maybe b
-//   outputToDatum o = case txOutDatum o of
-//     NoOutputDatum -> Nothing
-//     OutputDatum d -> processDatum d
-//     OutputDatumHash dh -> processDatum =<< findDatum dh info
-//    where
-//     processDatum = fromBuiltinData . getDatum
+  trace @"Bet must ne on the list"
+  expect Some(bet) = brdBets |> find(fn(e) { e.1st == signer_pkh })
+
+  trace @"Expected only one reference input"
+  expect [oracleIn] = self.reference_inputs
+
+  trace @"Oracle datum is expected"
+  expect InlineDatum(oracle_datum_) = oracleIn.output.datum
+  expect oracle_datum: OracleAnswerDatum = oracle_datum_
+  let OracleAnswerDatum(oracle_answer) = oracle_datum
+
+  let get_guess_diff =
+    fn(d: OracleAnswerDatum) -> Int {
+      let OracleAnswerDatum(teamGoal) = d
+      abs(oracle_answer - teamGoal)
+    }
+
+  let guess_diff = get_guess_diff(bet.2nd)
+
+  trace @"Oracle PKH is correct"
+  let Address(payment_credential, ..) = oracleIn.output.address
+  expect VerificationKey(actual_oracle_pub_key_hash) = payment_credential
+  expect actual_oracle_pub_key_hash == oracle_pkh
+
+  trace @"Must be after `RevealTime`"
+  let from_reveal_after: Interval<POSIXTime> = after(bet_reveal)
+  expect from_reveal_after |> interval_contains(self.validity_range)
+
+  trace @"Must be fuly spent"
+  expect Some(own_input) =
+    self.inputs |> find(fn(i) { i.output_reference == utxo })
+  expect [] = get_continuing_outputs(own_input.output.address, self)
+
+  trace @"Guess must be the closest one"
+
+  expect brdBets |> all(fn(b) { get_guess_diff(b.2nd) >= guess_diff })
+
+  // We are done
+  True
+}
 
 // Helpers
 
