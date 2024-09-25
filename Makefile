@@ -11,4 +11,4 @@ format:
 
 build:
 	@aiken build -u
-	# @aiken blueprint convert --validator key.revoke > ./scripts/key_validator.plutus
+	@aiken blueprint convert --validator bet_ref.bet_ref.spend > ./scripts/key_validator.plutus

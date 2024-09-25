@@ -11,3 +11,5 @@ docs/
 
 # git pre-commit hooks
 .pre-commit-config.yaml
+
+scripts/**.plutus
