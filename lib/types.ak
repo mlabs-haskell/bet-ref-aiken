@@ -1,5 +1,6 @@
-use aiken/crypto.{Blake2b_224, Hash, VerificationKey}
-use cardano/assets.{AssetName, PolicyId}
+use aiken/hash.{Blake2b_224, Hash}
+use aiken/transaction/credential.{VerificationKey}
+use aiken/transaction/value.{AssetName, PolicyId}
 
 pub type TeamGoals =
   Int
