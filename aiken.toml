@@ -1,7 +1,7 @@
 name = "mlabs-haskell/bet-ref-aiken"
 version = "0.0.0"
-compiler = "v1.1.2"
-plutus = "v3"
+compiler = "v1.0.29-alpha"
+plutus = "v2"
 license = "Apache-2.0"
 description = "Aiken contracts for project 'mlabs-haskell/bet-ref-aiken'"
 
@@ -12,7 +12,7 @@ platform = "github"
 
 [[dependencies]]
 name = "aiken-lang/stdlib"
-version = "v2.1.0"
+version = "1.9.0"
 source = "github"
 
 [config]

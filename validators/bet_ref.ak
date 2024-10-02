@@ -1,42 +1,51 @@
-use aiken/collection/dict.{Dict, foldl, map, union_with, values}
-use aiken/collection/list.{all, concat, filter, find, push}
+use aiken/dict.{Dict, foldl, map, union_with, values}
 use aiken/interval.{
   Finite, Interval, IntervalBound, NegativeInfinity, PositiveInfinity, after,
   before,
 }
+use aiken/list.{all, concat, filter, find, push}
 use aiken/math.{abs}
-use cardano/address.{Address, VerificationKey}
-use cardano/assets.{
+use aiken/transaction.{
+  DatumHash, InlineDatum, NoDatum, Output, OutputReference, ScriptContext, Spend,
+  Transaction, find_datum, find_input,
+}
+use aiken/transaction/credential.{Address, VerificationKeyCredential}
+use aiken/transaction/value.{
   AssetName, PolicyId, Value, from_asset_list, merge, negate, to_dict,
 }
-use cardano/transaction.{InlineDatum, Output, OutputReference, Transaction}
 use types.{
-  Bet, BetRefAction, BetRefDatum, BetRefParams, OracleAnswerDatum, POSIXTime,
-  PubKeyHash, Take,
+  BBet, Bet, BetRefAction, BetRefDatum, BetRefParams, OracleAnswerDatum,
+  POSIXTime, PubKeyHash, Take,
 }
 
-validator bet_ref(params: BetRefParams) {
-  spend(
-    mDatum: Option<BetRefDatum>,
-    brAction: BetRefAction,
-    // redeemer
-    utxo: OutputReference,
-    self: Transaction,
-  ) {
+validator(params: BetRefParams) {
+  fn spend(datum: BetRefDatum, brAction: BetRefAction, self: ScriptContext) {
     let BetRefParams(oracle_pkh, bet_until, bet_reveal, bet_step_list) = params
     let bet_step = from_asset_list(bet_step_list)
-    expect Some(datum): Option<BetRefDatum> = mDatum
+    // own input
+    expect Spend(ref) = self.purpose
+    expect Some(own) = self.transaction.inputs |> find_input(ref)
     when brAction is {
       Bet(guess) -> {
         trace @"Previous guess should exist"
-        handle_bet(guess, datum, bet_until, bet_step, utxo, self)
+        handle_bet(
+          guess,
+          datum,
+          bet_until,
+          bet_step,
+          own.output_reference,
+          self.transaction,
+        )
       }
-      Take -> handle_take(datum, oracle_pkh, bet_reveal, utxo, self)
+      Take ->
+        handle_take(
+          datum,
+          oracle_pkh,
+          bet_reveal,
+          own.output_reference,
+          self.transaction,
+        )
     }
-  }
-
-  else(_) {
-    fail
   }
 }
 
@@ -55,8 +64,13 @@ fn handle_bet(
 
   let out_value = s_out.value
   let in_value = own_input.output.value
-  expect InlineDatum(data) = s_out.datum
-  expect BetRefDatum(guesses, bet_value) = data
+  expect Some(data) =
+    when s_out.datum is {
+      InlineDatum(data) -> Some(data)
+      DatumHash(hash) -> find_datum([], self.datums, hash)
+      NoDatum -> None
+    }
+  expect BetRefDatum(guesses, bet_value): BetRefDatum = data
   let BetRefDatum(prev_guesses, prev_bet_value) = input_datum
 
   trace @"Must be before `BetUntil` time"
@@ -65,10 +79,9 @@ fn handle_bet(
 
   trace @"New guesses should be updated correctly"
   expect [signer_pkh] = self.extra_signatories
-  expect ( prev_guesses |> push(Pair(signer_pkh, guess)) ) == guesses
+  expect ( prev_guesses |> push(BBet(signer_pkh, guess)) ) == guesses
 
   trace @"The current bet must be more than the previous bet by at least `bet_step` amount"
-  //FIXME: this is not very clear to me
   let min_out_value =
     in_value |> merge(from_asset_list(prev_bet_value)) |> merge(bet_step)
   expect out_value |> geq(min_out_value)
@@ -93,10 +106,18 @@ fn handle_take(
   let BetRefDatum(brdBets, ..) = datum
 
   trace @"Bet must ne on the list"
-  expect Some(bet) = brdBets |> find(fn(e) { e.1st == signer_pkh })
+  expect Some(BBet(_signer, bet)) =
+    brdBets
+      |> find(
+          fn(e: BBet) {
+            let BBet(signer, _b) = e
+            signer == signer_pkh
+          },
+        )
 
   trace @"Expected only one reference input"
-  expect [oracleIn] = self.reference_inputs
+  expect [oracleIn] =
+    self.reference_inputs |> filter(fn(i) { i.output.reference_script == None })
 
   trace @"Oracle datum is expected"
   expect InlineDatum(oracle_datum_) = oracleIn.output.datum
@@ -109,11 +130,12 @@ fn handle_take(
       abs(oracle_answer - teamGoal)
     }
 
-  let guess_diff = get_guess_diff(bet.2nd)
+  let guess_diff = get_guess_diff(bet)
 
   trace @"Oracle PKH is correct"
   let Address(payment_credential, ..) = oracleIn.output.address
-  expect VerificationKey(actual_oracle_pub_key_hash) = payment_credential
+  expect VerificationKeyCredential(actual_oracle_pub_key_hash) =
+    payment_credential
   expect actual_oracle_pub_key_hash == oracle_pkh
 
   trace @"Must be after `RevealTime`"
@@ -127,7 +149,14 @@ fn handle_take(
 
   trace @"Guess must be the closest one"
 
-  expect brdBets |> all(fn(b) { get_guess_diff(b.2nd) >= guess_diff })
+  expect
+    brdBets
+      |> all(
+          fn(e) {
+            let BBet(_s, b) = e
+            get_guess_diff(b) >= guess_diff
+          },
+        )
 
   // We are done
   True

@@ -1,5 +1,5 @@
 {
-  description = "Rflxt On-chain Scripts";
+  description = "bet-ref Atlas' example on-chain scripts";
 
   nixConfig = {
     bash-prompt = "\\[\\e[0m\\][\\[\\e[0;2m\\]nix \\[\\e[0;1m\\]bet-ref Aiken \\[\\e[0;93m\\]\\w\\[\\e[0m\\]]\\[\\e[0m\\]$ \\[\\e[0m\\]";
@@ -16,6 +16,7 @@
       type = "github";
       owner = "aiken-lang";
       repo = "aiken";
+      rev = "16fb02ee49879deb16ebacefa3b26ee5a57b7f8b"; # v1.0.29-alpha
     };
   };
 
