@@ -116,7 +116,8 @@ fn handle_take(
         )
 
   trace @"Expected only one reference input"
-  expect [oracleIn] = self.reference_inputs
+  expect [oracleIn] =
+    self.reference_inputs |> filter(fn(i) { i.output.reference_script == None })
 
   trace @"Oracle datum is expected"
   expect InlineDatum(oracle_datum_) = oracleIn.output.datum
